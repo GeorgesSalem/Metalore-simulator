@@ -208,6 +208,8 @@ class MetaLoreEnv(gymnasium.Env):
 
         # Apply action and allocate bandwidth among entities
         bw_split, comp_split = self.handler.action(self, actions)
+        self.last_bw_split = bw_split
+        self.last_comp_split = comp_split
         self.allocate_bandwidth(bw_split)
 
         ###################################
@@ -225,8 +227,9 @@ class MetaLoreEnv(gymnasium.Env):
                 self.job_tracker.on_generated(job)
 
         for sensor in self.active_sensors:
-            job = self.job_generator.generate(sensor, self.time, nearest_sensor_id=None)
-            self.job_tracker.on_generated(job)
+             if self.time % sensor.update_interval == 0:
+                job = self.job_generator.generate(sensor, self.time, nearest_sensor_id=None)
+                self.job_tracker.on_generated(job)
 
         # 3. Transmit from entity tx queues → move completed jobs to BS proc queues
         for (bs, entity), rate in chain(self.datarates_ue.items(), self.datarates_sensor.items()):

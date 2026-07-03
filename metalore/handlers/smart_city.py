@@ -17,43 +17,66 @@ class SmartCityHandler(Handler):
 
     @classmethod
     def action_space(cls, env) -> spaces.Space:
-        """Define continuous action space for bandwidth allocation and computational power allocation"""
-        # Action: [bandwidth_allocation, compute_allocation]
-        low = np.array([0.0, 0.0], dtype=np.float32)
-        high = np.array([1.0, 1.0], dtype=np.float32)
+        """Define continuous action space for bandwidth and compute split."""
+        min_share = env.config["reward"].get("min_resource_share", 0.20)
+
+        low = np.array([min_share, min_share], dtype=np.float32)
+        high = np.array([1.0 - min_share, 1.0 - min_share], dtype=np.float32)
+
         return spaces.Box(low=low, high=high, dtype=np.float32)
     
     @classmethod
     def observation_space(cls, env) -> spaces.Space:
-        """Defines observation space."""
-        # Observation: [ue_queue_length, sensor_queue_length]
-        low = np.array([0.0, 0.0], dtype=np.float32)
-        high = np.array([1e4, 1e4], dtype=np.float32)
+        low = np.zeros(8, dtype=np.float32)
+        high = np.ones(8, dtype=np.float32) * 1e4
         return spaces.Box(low=low, high=high, dtype=np.float32)
-
-    @classmethod
-    def action(cls, env, actions) -> Tuple[float, float]:
-        """Process agent action into environment action."""
-        return (
-            float(np.clip(actions[0], 0.0, 1.0)),
-            float(np.clip(actions[1], 0.0, 1.0)),
-        )
 
     @classmethod
     def observation(cls, env) -> np.ndarray:
         """Computes observations for agent."""
-        ue_pending = sum(bs.proc_queues['UE'].length for bs in env.stations.values())
-        sensor_pending = sum(bs.proc_queues['SENSOR'].length for bs in env.stations.values())
-        return np.array([float(ue_pending), float(sensor_pending)], dtype=np.float32)
 
+        ue_tx_q = sum(ue.tx_queue.length for ue in env.active_ues)
+        sensor_tx_q = sum(s.tx_queue.length for s in env.active_sensors)
+
+        ue_proc_q = sum(bs.proc_queues['UE'].length for bs in env.stations.values())
+        sensor_proc_q = sum(bs.proc_queues['SENSOR'].length for bs in env.stations.values())
+
+        n_ue = max(1, env.num_ues)
+        n_sensor = max(1, env.num_sensors)
+
+        latest_aori = env.metrics.latest("mean_aori") or 0.0
+        latest_aosi = env.metrics.latest("mean_aosi") or 0.0
+
+        return np.array([
+            ue_tx_q / n_ue,
+            sensor_tx_q / n_sensor,
+            ue_proc_q / n_ue,
+            sensor_proc_q / n_sensor,
+            len(env.active_ues) / 100.0,
+            len(env.active_sensors) / 100.0,
+            latest_aori,
+            latest_aosi,
+        ], dtype=np.float32)
+
+    @classmethod
+    def action(cls, env, actions) -> Tuple[float, float]:
+        min_share = env.config["reward"].get("min_resource_share", 0.05)
+
+        return (
+            float(np.clip(actions[0], min_share, 1.0 - min_share)),
+            float(np.clip(actions[1], min_share, 1.0 - min_share)),
+        )
+
+    
     @classmethod
     def reward(cls, env) -> float:
         """Computes rewards for agent."""
         reward_cfg = env.config['reward']
+
         delay_threshold = reward_cfg['e2e_delay_threshold']
-        delay_penalty   = reward_cfg['delay_penalty']
+        delay_penalty = reward_cfg['delay_penalty']
         sync_base_reward = reward_cfg['sync_base_reward']
-        discount_factor  = reward_cfg['discount_factor']
+        discount_factor = reward_cfg['discount_factor']
 
         # UE jobs fully processed this timestep
         step_ue_jobs = [
@@ -61,21 +84,23 @@ class SmartCityHandler(Handler):
             if job.entity_type == 'UE'
         ]
 
-        # Part 1: delay penalty — applied per job that exceeded the e2e threshold
-        reward = sum(
-            delay_penalty
-            for job in step_ue_jobs
-            if job.aori > delay_threshold
-        )
+        reward = 0.0
 
-        # Part 2: sync reward — discounted by how stale the sensor data was at job birth
-        reward += sum(
-            sync_base_reward * (discount_factor ** job.aosi)
-            for job in step_ue_jobs
-        )
+        # Part 1: delay penalty
+        # Applied once per UE job that exceeded the e2e delay threshold
+        for job in step_ue_jobs:
+            if job.aori is not None and job.aori > delay_threshold:
+                reward += delay_penalty
+
+        # Part 2: synchronization reward
+        # Discounted by how stale the sensor data was
+        for job in step_ue_jobs:
+            if job.aosi is not None:
+                reward += sync_base_reward * (discount_factor ** job.aosi)
 
         return reward
 
+    
     @classmethod
     def check(cls, env) -> None:
         """Check if handler is applicable to simulation configuration."""

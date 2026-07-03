@@ -1,0 +1,7 @@
+gymnasium<1.0.0
+matplotlib
+numpy
+pandas
+pygame
+shapely
+svgpath2mpl

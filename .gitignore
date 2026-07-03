@@ -1,0 +1,54 @@
+# =========================
+# Virtual environment
+# =========================
+.venv/
+venv/
+env/
+
+# =========================
+# Python cache
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# =========================
+# Build / packaging
+# =========================
+build/
+dist/
+*.egg-info/
+
+# =========================
+# Logs & checkpoints
+# =========================
+logs/
+*.log
+
+# model checkpoints (VERY IMPORTANT for your project)
+*.zip
+*.pt
+*.pth
+*.ckpt
+
+# =========================
+# Results (your experiments)
+# =========================
+metalore/results/
+
+# =========================
+# Jupyter notebooks cache
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# VS Code
+# =========================
+.vscode/
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db

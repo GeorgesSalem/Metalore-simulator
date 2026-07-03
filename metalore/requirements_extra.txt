@@ -1,0 +1,8 @@
+# Install the MetaLore package first with: pip install -e .
+# Then install these training/evaluation tools:
+stable-baselines3[extra]==2.0.0
+gymnasium==0.28.1
+numpy==1.26.4
+pandas
+matplotlib
+tensorboard
