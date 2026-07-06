@@ -1,24 +1,27 @@
-from pathlib import Path
 import pandas as pd
 
 from static_reward_common import (
     METALORE_DIR,
+    SENSOR_VALUES,
     UE_VALUES,
-    NUM_SENSORS,
-    OPERATOR_INTENTION,
-    TRAIN_TIMESTEPS,
+    build_experiment_name,
+    sensor_tag,
 )
+
+GRID_METHOD_NAME = "grid_ue20_40_60_s10_20_30"
+GRID_EXPERIMENT_NAME = build_experiment_name(GRID_METHOD_NAME, sensor_values=SENSOR_VALUES)
+STATIC_FOLDER = f"static_{sensor_tag(sensor_values=SENSOR_VALUES)}s"
 
 BASE_DIR = (
     METALORE_DIR
     / "results"
     / "reward_pipeline"
-    / "static_25s"
-    / f"grid_static_25s_{OPERATOR_INTENTION}_{TRAIN_TIMESTEPS // 1000}k"
+    / STATIC_FOLDER
+    / GRID_EXPERIMENT_NAME
 )
 
-ALL_RESULTS = BASE_DIR / "grid_all_results.csv"
-BEST_RESULTS = BASE_DIR / "grid_best_by_ue.csv"
+ALL_RESULTS = BASE_DIR / f"{GRID_METHOD_NAME}_all_results.csv"
+BEST_RESULTS = BASE_DIR / f"{GRID_METHOD_NAME}_best_by_ue_sensor.csv"
 
 print("\n=== CHECKING GRID SEARCH RESULTS ===")
 print("Folder:", BASE_DIR)
@@ -39,8 +42,10 @@ print("\nTotal grid rows:", len(all_df))
 print("Best rows:", len(best_df))
 print("Expected UE values:", UE_VALUES)
 print("Found UE values:", sorted(best_df["num_ues"].unique().tolist()))
+print("Expected sensor values:", SENSOR_VALUES)
+print("Found sensor values:", sorted(best_df["num_sensors"].unique().tolist()))
 
-print("\n=== BEST ETA/C2 BY UE ===")
+print("\n=== BEST ETA/C2 BY UE/SENSORS ===")
 
 cols = [
     "num_ues",
@@ -66,15 +71,16 @@ print(best_df[cols].round(4).to_string(index=False))
 print("\n=== QUICK CHECK ===")
 
 errors = []
+expected_best_rows = len(UE_VALUES) * len(SENSOR_VALUES)
 
-if len(best_df) != len(UE_VALUES):
-    errors.append(f"Expected {len(UE_VALUES)} best rows, found {len(best_df)}")
+if len(best_df) != expected_best_rows:
+    errors.append(f"Expected {expected_best_rows} best rows, found {len(best_df)}")
 
 if sorted(best_df["num_ues"].unique().tolist()) != sorted(UE_VALUES):
     errors.append("Best result file does not contain all UE values.")
 
-if not (best_df["num_sensors"] == NUM_SENSORS).all():
-    errors.append("Some rows do not have 25 sensors.")
+if sorted(best_df["num_sensors"].unique().tolist()) != sorted(SENSOR_VALUES):
+    errors.append("Best result file does not contain all sensor values.")
 
 missing_cols = [c for c in cols if c not in best_df.columns]
 if missing_cols:
@@ -91,6 +97,7 @@ print("\n=== INTERPRETATION ===")
 
 for _, row in best_df.iterrows():
     ue = int(row["num_ues"])
+    sensors = int(row["num_sensors"])
     eta = row["eta"]
     c2 = row["c2"]
     completion = row["job_completion_rate"]
@@ -98,7 +105,7 @@ for _, row in best_df.iterrows():
     aosi = row["mean_aosi"]
     conv = row.get("reward_convergence_timestep", None)
 
-    print(f"\n{ue} UE / {NUM_SENSORS} sensors:")
+    print(f"\n{ue} UE / {sensors} sensors:")
     print(f"- Best eta = {eta}")
     print(f"- Best C2 = {c2}")
     print(f"- Completion = {completion * 100:.2f}%")
@@ -115,4 +122,4 @@ for _, row in best_df.iterrows():
     else:
         print("- Result is still weak. This UE scenario may need longer training or better reward.")
 
-print("\nNext step: compare grid_best_by_ue.csv with the manual result.")
+print(f"\nNext step: inspect {BEST_RESULTS.name}, then compare with manual or LLM results.")

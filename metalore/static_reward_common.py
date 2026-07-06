@@ -35,8 +35,9 @@ from metalore.scenarios import SingleCellEnv
 # GLOBAL STATIC SCENARIO SETTINGS
 # ============================================================
 
-UE_VALUES = [10, 30, 50, 70, 90]
-NUM_SENSORS = 25
+UE_VALUES = [20, 40, 60]
+SENSOR_VALUES = [10, 20]
+NUM_SENSORS = SENSOR_VALUES[0]
 MAX_STEPS = 100
 
 # PPO hyperparameters are fixed in all experiments.
@@ -87,22 +88,47 @@ def tag_float(x: float) -> str:
     return str(x).replace("-", "m").replace(".", "p")
 
 
-def build_experiment_name(prefix: str, eta: float | None = None, c2: float | None = None) -> str:
+def sensor_tag(num_sensors: int | None = None, sensor_values: List[int] | None = None) -> str:
+    """Create a readable sensor-count tag for experiment folders."""
+    if num_sensors is not None:
+        return str(int(num_sensors))
+    if sensor_values is not None:
+        return "_".join(str(int(value)) for value in sensor_values)
+    return str(int(NUM_SENSORS))
+
+
+def build_experiment_name(
+    prefix: str,
+    eta: float | None = None,
+    c2: float | None = None,
+    num_sensors: int | None = None,
+    sensor_values: List[int] | None = None,
+) -> str:
     """Create a readable experiment folder name."""
+    sensors = sensor_tag(num_sensors=num_sensors, sensor_values=sensor_values)
     if eta is None or c2 is None:
-        return f"{prefix}_static_25s_{OPERATOR_INTENTION}_{TRAIN_TIMESTEPS // 1000}k"
+        return f"{prefix}_static_{sensors}s_{OPERATOR_INTENTION}_{TRAIN_TIMESTEPS // 1000}k"
     return (
-        f"{prefix}_static_25s_eta{tag_float(eta)}_c2{tag_float(c2)}_"
+        f"{prefix}_static_{sensors}s_eta{tag_float(eta)}_c2{tag_float(c2)}_"
         f"{OPERATOR_INTENTION}_{TRAIN_TIMESTEPS // 1000}k"
     )
 
 
-def build_static_config(num_ues: int, eta: float, c2: float, seed: int) -> Dict:
+def build_static_config(
+    num_ues: int,
+    eta: float,
+    c2: float,
+    seed: int,
+    num_sensors: int | None = None,
+) -> Dict:
     """Create one static scenario: fixed UEs, fixed sensors, fixed reward eta/c2."""
+    if num_sensors is None:
+        num_sensors = NUM_SENSORS
+
     config = default_config()
 
     config["environment"]["num_ues"] = int(num_ues)
-    config["environment"]["num_sensors"] = int(NUM_SENSORS)
+    config["environment"]["num_sensors"] = int(num_sensors)
     config["environment"]["max_steps"] = int(MAX_STEPS)
     config["environment"]["seed"] = int(seed)
 
@@ -232,13 +258,23 @@ def train_one_model(
     method_name: str,
     experiment_name: str,
     num_ues: int,
+    num_sensors: int | None = None,
     eta: float,
     c2: float,
     model_path: Path,
     run_dir: Path,
 ) -> Dict:
     """Train one PPO model for one static scenario and one reward pair."""
-    config = build_static_config(num_ues=num_ues, eta=eta, c2=c2, seed=SEED)
+    if num_sensors is None:
+        num_sensors = NUM_SENSORS
+
+    config = build_static_config(
+        num_ues=num_ues,
+        num_sensors=num_sensors,
+        eta=eta,
+        c2=c2,
+        seed=SEED,
+    )
 
     if model_path.exists() and SKIP_IF_MODEL_EXISTS:
         print("Model already exists, skipping training:", model_path)
@@ -257,7 +293,7 @@ def train_one_model(
     print("\nTraining PPO")
     print("Method:", method_name)
     print("Experiment:", experiment_name)
-    print("UE / sensors:", num_ues, "/", NUM_SENSORS)
+    print("UE / sensors:", num_ues, "/", num_sensors)
     print("eta:", eta, "c2:", c2)
     print("Environment:", describe_env(env.unwrapped if hasattr(env, "unwrapped") else env))
     print("Model path:", model_path)
@@ -276,7 +312,10 @@ def train_one_model(
     checkpoint_callback = CheckpointCallback(
         save_freq=CHECKPOINT_FREQ,
         save_path=str(checkpoint_dir),
-        name_prefix=f"checkpoint_{method_name}_{num_ues}ue_eta{tag_float(eta)}_c2{tag_float(c2)}",
+        name_prefix=(
+            f"checkpoint_{method_name}_{num_ues}ue_{num_sensors}s_"
+            f"eta{tag_float(eta)}_c2{tag_float(c2)}"
+        ),
     )
 
     start = time.perf_counter()
@@ -305,13 +344,23 @@ def evaluate_one_model(
     method_name: str,
     experiment_name: str,
     num_ues: int,
+    num_sensors: int | None = None,
     eta: float,
     c2: float,
     model_path: Path,
     run_dir: Path,
 ) -> Dict:
     """Evaluate one PPO model on the SAME static scenario used for training."""
-    config = build_static_config(num_ues=num_ues, eta=eta, c2=c2, seed=SEED)
+    if num_sensors is None:
+        num_sensors = NUM_SENSORS
+
+    config = build_static_config(
+        num_ues=num_ues,
+        num_sensors=num_sensors,
+        eta=eta,
+        c2=c2,
+        seed=SEED,
+    )
     env = make_env_from_config(config, env_cls=SingleCellEnv, seed=SEED)
     model = PPO.load(str(model_path), device="cpu")
 
@@ -341,7 +390,7 @@ def evaluate_one_model(
                 "method": method_name,
                 "experiment": experiment_name,
                 "num_ues": num_ues,
-                "num_sensors": NUM_SENSORS,
+                "num_sensors": num_sensors,
                 "eta": eta,
                 "c2": c2,
                 "episode": episode,
@@ -361,7 +410,7 @@ def evaluate_one_model(
             "method": method_name,
             "experiment": experiment_name,
             "num_ues": num_ues,
-            "num_sensors": NUM_SENSORS,
+            "num_sensors": num_sensors,
             "eta": eta,
             "c2": c2,
             "episode": episode,
@@ -384,7 +433,7 @@ def evaluate_one_model(
                 jobs.insert(0, "episode", episode)
                 jobs.insert(0, "c2", c2)
                 jobs.insert(0, "eta", eta)
-                jobs.insert(0, "num_sensors", NUM_SENSORS)
+                jobs.insert(0, "num_sensors", num_sensors)
                 jobs.insert(0, "num_ues", num_ues)
                 jobs.insert(0, "experiment", experiment_name)
                 jobs.insert(0, "method", method_name)
@@ -436,16 +485,32 @@ def run_training_evaluation_for_pairs(
     *,
     method_name: str,
     experiment_name: str,
-    pairs_by_ue: Dict[int, List[Tuple[float, float]]],
+    pairs_by_ue: Dict[int, List[Tuple[float, float]]] | None = None,
+    pairs_by_scenario: Dict[Tuple[int, int], List[Tuple[float, float]]] | None = None,
     operator_intention: str = OPERATOR_INTENTION,
 ) -> pd.DataFrame:
     """
     Train/evaluate multiple eta/c2 pairs.
     pairs_by_ue example:
     {10: [(0.7, -2.0)], 20: [(0.7, -2.0)]}
+    pairs_by_scenario example:
+    {(20, 10): [(0.7, -2.0)], (20, 20): [(0.7, -2.0)]}
     """
-    base_dir = METALORE_DIR / "results" / "reward_pipeline" / "static_25s" / experiment_name
-    models_dir = METALORE_DIR / "models" / "reward_pipeline" / "static_25s" / experiment_name
+    if pairs_by_scenario is None:
+        if pairs_by_ue is None:
+            raise ValueError("Provide pairs_by_ue or pairs_by_scenario.")
+        pairs_by_scenario = {
+            (int(num_ues), int(NUM_SENSORS)): pairs
+            for num_ues, pairs in pairs_by_ue.items()
+        }
+
+    scenario_items = sorted(pairs_by_scenario.items())
+    ue_values = sorted({int(num_ues) for (num_ues, _), _ in scenario_items})
+    sensor_values = sorted({int(num_sensors) for (_, num_sensors), _ in scenario_items})
+    static_folder = f"static_{sensor_tag(sensor_values=sensor_values)}s"
+
+    base_dir = METALORE_DIR / "results" / "reward_pipeline" / static_folder / experiment_name
+    models_dir = METALORE_DIR / "models" / "reward_pipeline" / static_folder / experiment_name
     base_dir.mkdir(parents=True, exist_ok=True)
     models_dir.mkdir(parents=True, exist_ok=True)
 
@@ -455,15 +520,18 @@ def run_training_evaluation_for_pairs(
     print("Method:", method_name)
     print("Experiment:", experiment_name)
     print("Operator intention:", operator_intention)
-    print("UE values:", list(pairs_by_ue.keys()))
-    print("Sensors fixed:", NUM_SENSORS)
+    print("UE values:", ue_values)
+    print("Sensor values:", sensor_values)
     print("Train timesteps:", TRAIN_TIMESTEPS)
     print("Eval episodes:", EVAL_EPISODES)
     print("Output:", base_dir)
 
-    for num_ues, pairs in pairs_by_ue.items():
+    for (num_ues, num_sensors), pairs in scenario_items:
         for eta, c2 in pairs:
-            run_name = f"{num_ues}ue_{NUM_SENSORS}s_eta{tag_float(eta)}_c2{tag_float(c2)}_{TRAIN_TIMESTEPS // 1000}k"
+            run_name = (
+                f"{num_ues}ue_{num_sensors}s_eta{tag_float(eta)}_"
+                f"c2{tag_float(c2)}_{TRAIN_TIMESTEPS // 1000}k"
+            )
             run_dir = base_dir / run_name
             run_dir.mkdir(parents=True, exist_ok=True)
             model_path = models_dir / f"ppo_{method_name}_{run_name}.zip"
@@ -472,6 +540,7 @@ def run_training_evaluation_for_pairs(
                 method_name=method_name,
                 experiment_name=experiment_name,
                 num_ues=num_ues,
+                num_sensors=num_sensors,
                 eta=eta,
                 c2=c2,
                 model_path=model_path,
@@ -482,6 +551,7 @@ def run_training_evaluation_for_pairs(
                 method_name=method_name,
                 experiment_name=experiment_name,
                 num_ues=num_ues,
+                num_sensors=num_sensors,
                 eta=eta,
                 c2=c2,
                 model_path=model_path,
@@ -493,7 +563,7 @@ def run_training_evaluation_for_pairs(
                 "experiment": experiment_name,
                 "operator_intention": operator_intention,
                 "num_ues": num_ues,
-                "num_sensors": NUM_SENSORS,
+                "num_sensors": num_sensors,
                 "eta": eta,
                 "c2": c2,
                 "sync_base_reward": SYNC_BASE_REWARD,
@@ -511,28 +581,46 @@ def run_training_evaluation_for_pairs(
 
             df = pd.DataFrame(all_rows)
             df.to_csv(base_dir / f"{method_name}_all_results.csv", index=False)
-            best_df = (
+            best_by_ue_sensor_df = (
+                df.sort_values("score")
+                .groupby(["num_ues", "num_sensors"], as_index=False)
+                .head(1)
+                .sort_values(["num_ues", "num_sensors"])
+            )
+            best_by_ue_df = (
                 df.sort_values("score")
                 .groupby("num_ues", as_index=False)
                 .head(1)
                 .sort_values("num_ues")
             )
-            best_df.to_csv(base_dir / f"{method_name}_best_by_ue.csv", index=False)
+            best_by_ue_sensor_df.to_csv(
+                base_dir / f"{method_name}_best_by_ue_sensor.csv",
+                index=False,
+            )
+            best_by_ue_df.to_csv(base_dir / f"{method_name}_best_by_ue.csv", index=False)
 
             print("Score:", round(row["score"], 4))
             print("Saved partial results:", base_dir / f"{method_name}_all_results.csv")
 
     final_df = pd.DataFrame(all_rows)
     final_df.to_csv(base_dir / f"{method_name}_all_results.csv", index=False)
-    best_df = (
+    best_by_ue_sensor_df = (
+        final_df.sort_values("score")
+        .groupby(["num_ues", "num_sensors"], as_index=False)
+        .head(1)
+        .sort_values(["num_ues", "num_sensors"])
+    )
+    best_by_ue_df = (
         final_df.sort_values("score")
         .groupby("num_ues", as_index=False)
         .head(1)
         .sort_values("num_ues")
     )
-    best_df.to_csv(base_dir / f"{method_name}_best_by_ue.csv", index=False)
+    best_by_ue_sensor_df.to_csv(base_dir / f"{method_name}_best_by_ue_sensor.csv", index=False)
+    best_by_ue_df.to_csv(base_dir / f"{method_name}_best_by_ue.csv", index=False)
 
     print("\nFinished:", experiment_name)
     print("All results:", base_dir / f"{method_name}_all_results.csv")
-    print("Best by UE:", base_dir / f"{method_name}_best_by_ue.csv")
+    print("Best by UE/sensors:", base_dir / f"{method_name}_best_by_ue_sensor.csv")
+    print("Best by UE overall:", base_dir / f"{method_name}_best_by_ue.csv")
     return final_df
