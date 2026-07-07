@@ -1,5 +1,7 @@
+@"
 --editable .
-stable-baselines3[extra]
+stable-baselines3
 torch
 tqdm
 rich
+"@ | Set-Content requirements.txt

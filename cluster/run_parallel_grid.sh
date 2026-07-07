@@ -42,16 +42,8 @@ if [ ! -d "$VENV_DIR" ]; then
 fi
 source "$VENV_DIR/bin/activate"
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r "$PROJECT_DIR/requirements.txt"
 
-# Your repo currently has extra training requirements in metalore/requirements_extra.txt.
-# Install them automatically if present, because static_reward_common needs stable_baselines3.
-if [ -f "$PROJECT_DIR/requirements_extra.txt" ]; then
-    python -m pip install -r "$PROJECT_DIR/requirements_extra.txt"
-fi
-if [ -f "$PROJECT_DIR/metalore/requirements_extra.txt" ]; then
-    python -m pip install -r "$PROJECT_DIR/metalore/requirements_extra.txt"
-fi
 
 # Make imports robust for scripts stored in ./cluster/ and training helpers in ./metalore/.
 export PYTHONPATH="$PROJECT_DIR/metalore:$PROJECT_DIR:${PYTHONPATH:-}"

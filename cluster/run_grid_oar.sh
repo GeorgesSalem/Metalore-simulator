@@ -31,13 +31,7 @@ if [ ! -d "$VENV_DIR" ]; then
 fi
 source "$VENV_DIR/bin/activate"
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-if [ -f "$PROJECT_DIR/requirements_extra.txt" ]; then
-    python -m pip install -r "$PROJECT_DIR/requirements_extra.txt"
-fi
-if [ -f "$PROJECT_DIR/metalore/requirements_extra.txt" ]; then
-    python -m pip install -r "$PROJECT_DIR/metalore/requirements_extra.txt"
-fi
+python -m pip install -r "$PROJECT_DIR/requirements.txt"
 
 export PYTHONPATH="$PROJECT_DIR/metalore:$PROJECT_DIR:${PYTHONPATH:-}"
 export OMP_NUM_THREADS=1
