@@ -21,21 +21,30 @@ dist/
 *.egg-info/
 
 # =========================
-# Logs & checkpoints
+# Logs & OAR cluster files
 # =========================
 logs/
 *.log
+OAR.*.stdout
+OAR.*.stderr
+oar_parallel_*.log
+oar_run_*.log
 
-# model checkpoints (VERY IMPORTANT for your project)
+# =========================
+# Model checkpoints
+# =========================
 *.zip
 *.pt
 *.pth
 *.ckpt
 
 # =========================
-# Results (your experiments)
+# Results / experiment outputs
 # =========================
 metalore/results/
+metalore/models/
+cluster_runs/
+results_backups/
 
 # =========================
 # Jupyter notebooks cache

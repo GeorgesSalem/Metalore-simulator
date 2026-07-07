@@ -1,1 +1,5 @@
 --editable .
+stable-baselines3[extra]
+torch
+tqdm
+rich
