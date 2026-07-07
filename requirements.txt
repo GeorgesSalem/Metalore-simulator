@@ -1,7 +1,6 @@
-@"
 --editable .
 stable-baselines3
 torch
 tqdm
 rich
-"@ | Set-Content requirements.txt
+matplotlib==3.10.9
