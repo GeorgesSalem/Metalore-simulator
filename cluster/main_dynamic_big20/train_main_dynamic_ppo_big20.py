@@ -107,6 +107,36 @@ SUPPORT_AOSI_MAX = 4.0
 # Dataset analysis: choose one fixed eta/C2 pair
 # -----------------------------------------------------------------------------
 
+def _json_safe(value: Any) -> Any:
+    """Convert simulator output into JSON-compatible values."""
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+
+    if isinstance(value, np.ndarray):
+        return [_json_safe(item) for item in value.tolist()]
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    if isinstance(value, Path):
+        return str(value)
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+
+    return value
+
+
+
 def _minmax_penalty(series: pd.Series, higher_is_better: bool) -> pd.Series:
     values = pd.to_numeric(series, errors="coerce")
     lo = float(values.min())
@@ -1438,7 +1468,7 @@ def evaluate_dynamic_response_trace(
     )
     trace.to_csv(output_dir / "dynamic_response_trace.csv", index=False)
     with (output_dir / "dynamic_response_summary.json").open("w", encoding="utf-8") as f:
-        json.dump(final_summary, f, indent=2)
+        json.dump(_json_safe(final_summary), f, indent=2)
 
     plot_dir = output_dir / "plots"
     plot_dir.mkdir(parents=True, exist_ok=True)
@@ -1596,9 +1626,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train one dynamic general PPO model for MetaLore."
     )
-    parser.add_argument("--dataset", type=str, default=None)
-    parser.add_argument("--eta", type=float, default=None)
-    parser.add_argument("--c2", type=float, default=None)
+    parser.add_argument("--eta", type=float, default=0.8)
+    parser.add_argument("--c2", type=float, default=-1.0)
+    parser.add_argument(
+        "--support-total",
+        type=int,
+        default=80,
+        help="Practical supported total number of active UEs and sensors.",
+    )
     parser.add_argument("--train-timesteps", type=int, default=DEFAULT_TRAIN_TIMESTEPS)
     parser.add_argument("--episode-steps", type=int, default=DEFAULT_EPISODE_STEPS)
     parser.add_argument("--load-hold-steps", type=int, default=DEFAULT_LOAD_HOLD_STEPS)
@@ -1693,31 +1728,59 @@ def main() -> None:
     if args.train_max_ues < MIN_UE or args.train_max_sensors < MIN_SENSOR:
         raise ValueError("Training maxima must be at least the configured minima")
 
-    dataset_path = find_dataset(project_root, args.dataset)
-    print("Dataset:", dataset_path)
+    # Fixed reward configuration: no dataset is used for PPO training.
+    eta = float(args.eta)
+    c2 = float(args.c2)
 
-    eta, c2, _, reward_selection = choose_fixed_reward_pair(
-        dataset_path=dataset_path,
-        output_dir=output_dir,
-        eta_override=args.eta,
-        c2_override=args.c2,
-    )
+    if not 0.0 <= eta <= 1.0:
+        raise ValueError("--eta must be between 0 and 1.")
+
+    if c2 >= 0.0:
+        raise ValueError("--c2 must be negative.")
+
+    if args.support_total < 1:
+        raise ValueError("--support-total must be positive.")
+
+    reward_selection = {
+        "source": "fixed configuration; no dataset",
+        "eta": eta,
+        "c2": c2,
+        "requested_support_total": int(args.support_total),
+    }
+
+    # The theoretical report is still calculated from the simulator's
+    # 600 MHz bandwidth, channel model and 800-unit compute capacity.
     capacity = estimate_capacity(seed=args.seed)
 
-    empirical_max = reward_selection.get("empirical_max_supported_total_devices")
-    theoretical_average = capacity["approx_total_device_limits"][
-        "communication_average_position"
-    ]
-    compute_limit = capacity["approx_total_device_limits"]["computation"]
-    if empirical_max is not None:
-        support_total = int(min(empirical_max, theoretical_average, compute_limit))
-    else:
-        support_total = int(min(theoretical_average, compute_limit))
+    theoretical_average = int(
+        capacity["approx_total_device_limits"][
+            "communication_average_position"
+        ]
+    )
+    compute_limit = int(
+        capacity["approx_total_device_limits"]["computation"]
+    )
 
-    with (output_dir / "reward_selection.json").open("w", encoding="utf-8") as f:
+    # Keep 80 as the practical boundary, but never exceed the theoretical
+    # communication or computation limits.
+    support_total = int(
+        min(args.support_total, theoretical_average, compute_limit)
+    )
+
+    reward_selection["effective_support_total"] = support_total
+    reward_selection["communication_average_limit"] = theoretical_average
+    reward_selection["computation_limit"] = compute_limit
+
+    with (output_dir / "reward_selection.json").open(
+        "w", encoding="utf-8"
+    ) as f:
         json.dump(reward_selection, f, indent=2)
-    with (output_dir / "capacity_report.json").open("w", encoding="utf-8") as f:
+
+    with (output_dir / "capacity_report.json").open(
+        "w", encoding="utf-8"
+    ) as f:
         json.dump(capacity, f, indent=2)
+
     create_capacity_boundary_plot(
         capacity=capacity,
         output_dir=output_dir,
@@ -1730,18 +1793,16 @@ def main() -> None:
     print("\n=== FIXED REWARD PARAMETERS ===")
     print(f"eta = {eta}")
     print(f"C2  = {c2}")
-    print("Selection source:", reward_selection["source"])
-    print("Empirical supported total from dataset:", empirical_max)
+    print("Selection source: fixed configuration; no dataset")
 
     print("\n=== CAPACITY ESTIMATE ===")
     for key, value in capacity["approx_total_device_limits"].items():
         print(f"{key}: {value}")
-    print("Practical support total used by training curriculum:", support_total)
+
+    print("Practical support total used by curriculum:", support_total)
     print(
-        "WARNING: the requested 100 UE + 50 sensor state has 150 devices. "
-        "It is an overload state under the current 600 MHz / 800-unit BS. "
-        "The training includes some overload episodes so PPO learns graceful degradation, "
-        "but 150 devices cannot be claimed as fully supported."
+        "Loads above this boundary are included as overload examples. "
+        "The 100 UE + 50 sensor case is a severe stress test."
     )
 
     config = build_dynamic_config(
